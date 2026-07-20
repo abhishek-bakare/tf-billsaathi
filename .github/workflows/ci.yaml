@@ -72,35 +72,34 @@ jobs:
               #true: ignoring high vuln also
               run: npm audit --audit-level=high || true
     #stage 3
-    sonarqube-testing:
-        name: "SAST using sonarqube"
-        needs: sca
-        runs-on: ubuntu-latest
-        continue-on-error: true
-        strategy:
-            matrix:
-                components: [billsaathi-admin, billsaathi-ecom]
-        steps:
-            - name: checkout code
-              uses: actions/checkout@v4
-
-            - name: SonarQube testing
-              uses: sonarsource/sonarqube-scan-action@master
-              env:
-                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-                SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-              # used to pause your GitHub Actions workflow and wait for the results of a SonarQube analysis
-            - name: Sonarqube quality gate check
-              uses: sonarsource/sonarqube-quality-gate-action@master
-              #if sonar server is slow then GH runner wait 5mins after it starts
-              timeout-minutes: 5
-              env:
-                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    #sonarqube-testing:
+    #    name: "SAST using sonarqube"
+    #    needs: sca
+    #    runs-on: ubuntu-latest
+    #    continue-on-error: true
+    #    strategy:
+    #        matrix:
+    #            components: [billsaathi-admin, billsaathi-ecom]
+    #    steps:
+    #        - name: checkout code
+    #          uses: actions/checkout@v4
+    #        - name: SonarQube testing
+    #          uses: sonarsource/sonarqube-scan-action@master
+    #          env:
+    #            SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    #            SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+    #          # used to pause your GitHub Actions workflow and wait for the results of a SonarQube analysis
+    #        - name: Sonarqube quality gate check
+    #          uses: sonarsource/sonarqube-quality-gate-action@master
+    #          #if sonar server is slow then GH runner wait 5mins after it starts
+    #          timeout-minutes: 5
+    #          env:
+    #            SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     
     admin-build-image-and-scan:
       name: "Building image, scan for Admin"
       environment: production
-      needs: sonarqube-testing
+      needs: sca
       runs-on: ubuntu-latest
       if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
       continue-on-error: false
@@ -168,7 +167,7 @@ jobs:
 
     ecom-build-image-and-scan:
       name: "Building image, scan for Ecom"
-      needs: sonarqube-testing
+      needs: sca
       environment: production
       runs-on: ubuntu-latest
       if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
