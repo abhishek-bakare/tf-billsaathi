@@ -1,0 +1,20 @@
+name: "Node setup and install"
+description: "Setup node, configure cache, install dependency"
+
+inputs:
+    component_path:
+        description: "The directory where package-lock is located"
+        required: true
+runs:
+    using: "composite"
+    steps:
+        - name: setup node.js
+          uses: actions/setup-node@v4
+          with:
+            node-version: "24"
+            cache: "npm"
+            cache-dependency-path: "${{ inputs.component_path }}/inventory-app/package-lock.json"
+        - name: Dependencies
+          working-directory: ${{ inputs.component_path }}/inventory-app
+          shell: bash
+          run: npm ci

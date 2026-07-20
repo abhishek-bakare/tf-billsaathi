@@ -1,0 +1,290 @@
+name: Billsaathi workflow
+on:
+    push:
+        branches: ["development","main"]
+        tags: ['v*.*.*']
+    pull_request:
+        branches: ["development","main"]
+        types: [opened, synchronize, ready_for_review, reopened]
+env:
+    ECR_REPO: dev-web-app-ecr
+jobs:
+    #stage 1
+    sec-scanning:
+        name: "Secrets scanning in code"
+        runs-on: ubuntu-latest
+        continue-on-error: true
+        strategy:
+            matrix: 
+                components: [billsaathi-admin, billsaathi-ecom]
+        # when PR created it required permission for tokens
+        permissions:
+          contents: read
+          pull-requests: read # This gives Gitleaks access to the PR commits API
+        steps:
+            - name: checkout code
+              uses: actions/checkout@v4
+              with:
+                # Fetches only the single latest commit. use 0 for all commits  
+                fetch-depth: 0
+
+            - name: Setup node
+              uses: ./.github/workflows/repeated
+              with:
+                component_path: ${{ matrix.components }}
+
+            - name: gitleaks
+              uses: gitleaks/gitleaks-action@v2
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                #where to save the files
+                GITLEAKS_REPORT_PATH: results.sarif
+                #disables the buggy upload-steps
+                GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+            - name: Upload gitleaks reports
+              #run this if leaks are found
+              if: always()     
+              uses: actions/upload-artifact@v4
+              with:
+                #use unique name for avoiding conflicts to upload artifacts
+                name: gitleaks-results-${{ matrix.components }}
+                path: results.sarif
+    #stage 2
+    sca:
+        name: "Dependency audit"
+        runs-on: ubuntu-latest
+        continue-on-error: false
+        strategy:
+            matrix:
+                components: [billsaathi-admin, billsaathi-ecom]
+        steps:
+            - name: checkout-code
+              uses: actions/checkout@v4
+            
+            - name: setup node
+              uses: ./.github/workflows/repeated
+              with:
+                component_path: ${{ matrix.components }}
+            
+            - name: npm audit
+              working-directory: ${{ matrix.components }}/inventory-app
+              #true: ignoring high vuln also
+              run: npm audit --audit-level=high || true
+    #stage 3
+    sonarqube-testing:
+        name: "SAST using sonarqube"
+        needs: sca
+        runs-on: ubuntu-latest
+        continue-on-error: false
+        strategy:
+            matrix:
+                components: [billsaathi-admin, billsaathi-ecom]
+        steps:
+            - name: checkout code
+              uses: actions/checkout@v4
+
+            - name: SonarQube testing
+              uses: sonarsource/sonarqube-scan-action@master
+              env:
+                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+              # used to pause your GitHub Actions workflow and wait for the results of a SonarQube analysis
+            - name: Sonarqube quality gate check
+              uses: sonarsource/sonarqube-quality-gate-action@master
+              #if sonar server is slow then GH runner wait 5mins after it starts
+              timeout-minutes: 5
+              env:
+                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    
+    admin-build-image-and-scan:
+      name: "Building image, scan for Admin"
+      environment: production
+      needs: sonarqube-testing
+      runs-on: ubuntu-latest
+      if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
+      continue-on-error: false
+      #This grants specific security scopes to the GITHUB_TOKEN for this job
+      permissions:
+        id-token: write         # Required for OIDC AWS Authentication
+        contents: read          #allows job to pull your code
+        packages: write         #allows job to push images to registry
+        security-events: write  #required to upload security Trivy results to GH security tab
+      #strategy:
+        #matrix:
+          #components: [billsaathi-admin, billsaathi-ecom]
+      outputs:
+        registry: ${{ steps.ecr-login.outputs.registry }}
+      steps:
+        - name: checkout code
+          uses: actions/checkout@v4
+        - name: setup docker buildx
+          uses: docker/setup-buildx-action@v3
+          #we build the image locally & scan it before sending to registry
+        - name: Configure AWS credentials using OIDC
+          # Don't push on PRs, only on merges to main
+          if: github.event_name != 'pull_request' 
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            role-to-assume: arn:aws:iam::${{ secrets.AWS_ID }}:role/github-actions-ecr-role
+            aws-region: us-east-1
+        - name: Login to ECR 
+          if: github.event_name != 'pull_request'
+          id: ecr-login
+          uses: aws-actions/amazon-ecr-login@v2
+        - name: Build docker image locally
+          uses: docker/build-push-action@v5
+          with:
+            context: billsaathi-admin/inventory-app
+            file: ./billsaathi-admin/inventory-app/Dockerfile
+            load: true  #keeps the image in local for scanning
+            tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:admin-${{ github.ref_name }}
+            #passing firebase secrets
+            build-args: |
+              VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+              VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+              VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+              VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+              VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+              VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+              VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+        - name: Run Trivy vuln scanner
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:admin-${{ github.ref_name }}
+            format: "table"
+            exit-code: "1"        #fails the entire GH action if it it found vuln
+            ignore-unfixed: true  #trivy will ignore bugs that dont have fix available
+            vuln-type: "os,library"   #scans both os(alpine,debian) and code packages
+            severity: "CRITICAL,HIGH"
+        
+        - name: Push Docker image to ECR
+          if: github.event_name != 'pull_request'
+          env:
+            REGISTRY: ${{ steps.ecr-login.outputs.short }}
+            REPOSITORY: dev-web-app-ecr
+          run: | 
+            docker push ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:admin-${{ github.ref_name }}
+
+    ecom-build-image-and-scan:
+      name: "Building image, scan for Ecom"
+      needs: sonarqube-testing
+      environment: production
+      runs-on: ubuntu-latest
+      if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
+      continue-on-error: false
+      #This grants specific security scopes to the GITHUB_TOKEN for this job
+      permissions:
+        contents: read          #allows job to pull your code
+        packages: write         #allows job to push images to registry
+        security-events: write  #required to upload security Trivy results to GH security tab
+      #strategy:
+        #matrix:
+          #components: [billsaathi-admin, billsaathi-ecom]
+      outputs:
+        registry: ${{ steps.ecr-login.outputs.registry }}
+      steps:
+        - name: checkout code
+          uses: actions/checkout@v4
+        - name: setup docker buildx
+          uses: docker/setup-buildx-action@v3
+          #we build the image locally & scan it before sending to registry
+        - name: Configure AWS credentials using OIDC
+          # Don't push on PRs, only on merges to main
+          if: github.event_name != 'pull_request' 
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            role-to-assume: arn:aws:iam::${{ secrets.AWS_ID }}:role/github-actions-ecr-role
+            aws-region: us-east-1
+        - name: Login to ECR 
+          if: github.event_name != 'pull_request'
+          id: ecr-login
+          uses: aws-actions/amazon-ecr-login@v2
+        - name: Build docker image locally
+          uses: docker/build-push-action@v5
+          with:
+            context: billsaathi-ecom/inventory-app
+            file: ./billsaathi-ecom/inventory-app/Dockerfile
+            load: true  #keeps the image in local for scanning
+            tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:ecom-${{ github.ref_name }}
+            #passing firebase secrets
+            build-args: |
+              VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+              VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+              VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+              VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+              VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+              VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+              VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+        - name: Run Trivy vuln scanner
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:ecom-${{ github.ref_name }}
+            format: "table"
+            exit-code: "1"        #fails the entire GH action if it it found vuln
+            ignore-unfixed: true  #trivy will ignore bugs that dont have fix available
+            vuln-type: "os,library"   #scans both os(alpine,debian) and code packages
+            severity: "CRITICAL,HIGH"
+        
+        - name: Push Docker image to ECR
+          if: github.event_name != 'pull_request'
+          run: | 
+            docker push ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:ecom-${{ github.ref_name }}
+
+    update-manifest:
+      name: "Update manifest"
+      needs: ['admin-build-image-and-scan', 'ecom-build-image-and-scan']
+      runs-on: ubuntu-latest
+      strategy:
+        matrix:
+          apps: [
+            {name: "billsathi-bill-admin", path: "gitops-repo/admin", prefix: "admin-"},
+            {name: "billsathi-bill-ecom", path: "gitops-repo/ecom", prefix: "ecom-"}
+          ]
+      if: startsWith(github.ref, 'refs/tags/')
+      steps:
+        - name: Generate temp GitOps token
+          id: app-token
+          uses: actions/create-github-app-token@v1
+          with:
+            app-id: ${{ secrets.GITOPS_APP_ID }}
+            private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+        - name: Checkout code
+          uses: actions/checkout@v4
+          with:
+            repository: abhishek-bakare/tf-k8-billsaathi
+            token: ${{ steps.app-token.outputs.token }}
+            path: gitops-repo     # code will downloaded inside gitpos-repo folder
+        - name: setup kustomize
+          run: |
+            KUSTOMIZE_VERSION="5.0.0"
+            curl -sLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+            tar -xzf "kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+            # Move it to a local binary folder or just execute it directly
+            chmod +x kustomize
+            sudo mv kustomize /usr/local/bin/kustomize
+        - name: update image tags
+          working-directory: gitops-repo/${{ matrix.apps.path }}
+          run: |
+            VERSION_TAG=${{ github.ref_name }}
+            REGISTRY=${{ needs.admin-build-image-and-scan.outputs.registry }}
+            
+            kustomize edit set image ${{ matrix.apps.name }}=$REGISTRY/${{ env.ECR_REPO }}:${{ matrix.apps.prefix }}-$VERSION_TAG
+
+    #k8s-scanning:
+      #Control Plane: Checks settings for the API server, etcd, scheduler, and controller manager (e.g., ensuring anonymous auth is disabled).
+      #Worker Nodes: Verifies the configuration of the kubelet and proxy services on your nodes.
+      #Policies: Validates RBAC (Role-Based Access Control), secrets management, and network policies
+      #name: "Scanning k8s manifests for misconfigurations"
+      #needs: sonarqube-testing
+      #runs-on: [self-hosted, local-minikube]
+      #continue-on-error: false
+      #steps:
+       # - name: Scan using Kubescape
+        #  uses: kubescape/github-action@main
+         # with:
+          #  format: sarif
+           # outputFile: results
+            # Scan against specific frameworks like CIS and NSA
+            #frameworks: "cis,nsa"
+            #files: "k8s/**/*.yaml"

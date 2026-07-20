@@ -1,0 +1,23 @@
+{
+  "short_name": "Billsathi Demo",
+  "name": "Billsathi POS & Admin",
+  "icons": [
+    {
+      "src": "/Drushya-india-main-logo.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/Drushya-india-main-logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0F172A",
+  "background_color": "#ffffff"
+}
