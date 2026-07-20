@@ -125,7 +125,7 @@ jobs:
           if: github.event_name != 'pull_request' 
           uses: aws-actions/configure-aws-credentials@v4
           with:
-            role-to-assume: arn:aws:iam::${{ secrets.AWS_ID }}:role/github-actions-ecr-role
+            role-to-assume: arn:aws:iam::059325865650:role/github-actions-ecr-role
             aws-region: us-east-1
         - name: Login to ECR 
           if: github.event_name != 'pull_request'
@@ -194,7 +194,7 @@ jobs:
           if: github.event_name != 'pull_request' 
           uses: aws-actions/configure-aws-credentials@v4
           with:
-            role-to-assume: arn:aws:iam::${{ secrets.AWS_ID }}:role/github-actions-ecr-role
+            role-to-assume: arn:aws:iam::059325865650:role/github-actions-ecr-role
             aws-region: us-east-1
         - name: Login to ECR 
           if: github.event_name != 'pull_request'
