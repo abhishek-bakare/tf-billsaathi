@@ -101,7 +101,7 @@ jobs:
       environment: production
       needs: sca
       runs-on: ubuntu-latest
-      if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
+      if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}  # run if only trigger was a tag
       continue-on-error: false
       #This grants specific security scopes to the GITHUB_TOKEN for this job
       permissions:
@@ -170,7 +170,7 @@ jobs:
       needs: sca
       environment: production
       runs-on: ubuntu-latest
-      if: startsWith(github.ref, 'refs/tags/')    # run if only trigger was a tag
+      if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}    # run if only trigger was a tag
       continue-on-error: false
       #This grants specific security scopes to the GITHUB_TOKEN for this job
       permissions:
