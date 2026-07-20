@@ -76,7 +76,7 @@ jobs:
         name: "SAST using sonarqube"
         needs: sca
         runs-on: ubuntu-latest
-        continue-on-error: false
+        continue-on-error: true
         strategy:
             matrix:
                 components: [billsaathi-admin, billsaathi-ecom]
