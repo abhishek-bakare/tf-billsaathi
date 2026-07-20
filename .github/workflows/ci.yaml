@@ -1,10 +1,10 @@
 name: Billsaathi workflow
 on:
     push:
-        branches: ["development","main"]
+        branches: ["staging","main"]
         tags: ['v*.*.*']
     pull_request:
-        branches: ["development","main"]
+        branches: ["staging","main"]
         types: [opened, synchronize, ready_for_review, reopened]
 env:
     ECR_REPO: dev-web-app-ecr
