@@ -238,8 +238,8 @@ jobs:
       strategy:
         matrix:
           apps: [
-            {name: "billsathi-bill-admin", path: "gitops-repo/dev/app-k8s/admin", prefix: "admin-"},
-            {name: "billsathi-bill-ecom", path: "gitops-repo/dev/app-k8s/ecom", prefix: "ecom-"}
+            {name: "billsathi-bill-admin", path: "dev/app-k8s/admin", prefix: "admin-"},
+            {name: "billsathi-bill-ecom", path: "dev/app-k8s/ecom", prefix: "ecom-"}
           ]
       if: startsWith(github.ref, 'refs/tags/')
       steps:
@@ -263,11 +263,19 @@ jobs:
             # Move it to a local binary folder or just execute it directly
             chmod +x kustomize
             sudo mv kustomize /usr/local/bin/kustomize
+        - name: Configure AWS credentials using OIDC
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            role-to-assume: arn:aws:iam::${{ secrets.AWS_ID }}:role/gh-ecr
+            aws-region: us-east-1
+        - name: Login to ECR 
+          id: ecr-login
+          uses: aws-actions/amazon-ecr-login@v2
         - name: update image tags
           working-directory: gitops-repo/${{ matrix.apps.path }}
           run: |
             VERSION_TAG=${{ github.ref_name }}
-            REGISTRY=${{ needs.admin-build-image-and-scan.outputs.registry }}
+            REGISTRY=${{ steps.ecr-login.outputs.registry }}
             
             kustomize edit set image ${{ matrix.apps.name }}=$REGISTRY/${{ env.ECR_REPO }}:${{ matrix.apps.prefix }}-$VERSION_TAG
 
