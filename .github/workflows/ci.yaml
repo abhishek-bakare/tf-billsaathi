@@ -252,6 +252,8 @@ jobs:
           with:
             app-id: ${{ secrets.GITOPS_APP_ID }}
             private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+            owner: "abhishek-bakare"
+            repositories: "tf-k8-billsaathi"
         - name: Checkout code
           uses: actions/checkout@v4
           with:
@@ -286,7 +288,7 @@ jobs:
         - name: Commit and Push to Manifest Repo
           working-directory: gitops-repo
           run: |
-            git config user.name "GitHub Actions Bot"
+            git config user.name "billsaathi-gitops-bot"
             git config user.email "actions@github.com"
             
             # Stage the changes made by Kustomize
