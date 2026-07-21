@@ -235,6 +235,9 @@ jobs:
       name: "Update manifest"
       needs: ['admin-build-image-and-scan', 'ecom-build-image-and-scan']
       runs-on: ubuntu-latest
+      permissions:
+        id-token: write # Required for secure AWS OIDC login
+        contents: read
       strategy:
         matrix:
           apps: [
