@@ -238,8 +238,8 @@ jobs:
       strategy:
         matrix:
           apps: [
-            {name: "billsathi-bill-admin", path: "gitops-repo/admin", prefix: "admin-"},
-            {name: "billsathi-bill-ecom", path: "gitops-repo/ecom", prefix: "ecom-"}
+            {name: "billsathi-bill-admin", path: "gitops-repo/dev/app-k8s/admin", prefix: "admin-"},
+            {name: "billsathi-bill-ecom", path: "gitops-repo/dev/app-k8s/ecom", prefix: "ecom-"}
           ]
       if: startsWith(github.ref, 'refs/tags/')
       steps:
