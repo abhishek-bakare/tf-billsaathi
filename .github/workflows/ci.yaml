@@ -281,7 +281,22 @@ jobs:
             REGISTRY=${{ steps.ecr-login.outputs.registry }}
             
             kustomize edit set image ${{ matrix.apps.name }}=$REGISTRY/${{ env.ECR_REPO }}:${{ matrix.apps.prefix }}-$VERSION_TAG
+            cd ../../../
 
+        - name: Commit and Push to Manifest Repo
+          working-directory: gitops-repo
+          run: |
+            git config user.name "GitHub Actions Bot"
+            git config user.email "actions@github.com"
+            
+            # Stage the changes made by Kustomize
+            git add .
+            
+            # Commit the changes
+            git commit -m "chore(gitops): update images to release ${{ github.ref_name }}"
+            
+            # Push back to the tf-k8-billsaathi repository
+            git push origin HEAD
     #k8s-scanning:
       #Control Plane: Checks settings for the API server, etcd, scheduler, and controller manager (e.g., ensuring anonymous auth is disabled).
       #Worker Nodes: Verifies the configuration of the kubelet and proxy services on your nodes.
