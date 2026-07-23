@@ -67,10 +67,14 @@ jobs:
               with:
                 component_path: ${{ matrix.components }}
             
-            - name: npm audit
-              working-directory: ${{ matrix.components }}/inventory-app
-              #true: ignoring high vuln also
-              run: npm audit --audit-level=high || true
+            - name: npm audit (Trivy FS Scan)
+              uses: aquasecurity/trivy-action@master
+              with:
+                scan-type: 'fs'
+                scan-ref: '${{ matrix.components }}/inventory-app'
+                format: 'table'
+                exit-code: '1'    # Fail if true vulnerabilities are found
+                severity: 'CRITICAL'
     #stage 3
     #sonarqube-testing:
     #    name: "SAST using sonarqube"
@@ -138,6 +142,9 @@ jobs:
             file: ./billsaathi-admin/inventory-app/Dockerfile
             load: true  #keeps the image in local for scanning
             tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:admin-${{ github.ref_name }}
+            # speedup the build using cache so save cost 
+            cache-from: type=gha,scope=admin
+            cache-to: type=gha,mode=max,scope=admin
             #passing firebase secrets
             build-args: |
               VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -164,6 +171,17 @@ jobs:
             REPOSITORY: dev-web-app-ecr
           run: | 
             docker push ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:admin-${{ github.ref_name }}
+        - name: Slack notification on failure
+          if: failure()
+          uses: rtCamp/action-slack-notify@v2
+          env:
+            SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+            SLACK_CHANNEL: 'all-gh-actions'         # channel name
+            SLACK_COLOR: 'danger'
+            SLACK_USERNAME: 'Billsathi pipeline'
+            SLACK_ICON_EMOJI: ':rotating_light:'
+            SLACK_TITLE: '🚨 CI/CD Pipeline Failed'
+            SLACK_MESSAGE: 'The build or security scan failed for admin-app. Click the Actions URL to view the Trivy logs.'
 
     ecom-build-image-and-scan:
       name: "Building image, scan for Ecom"
@@ -207,6 +225,9 @@ jobs:
             file: ./billsaathi-ecom/inventory-app/Dockerfile
             load: true  #keeps the image in local for scanning
             tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:ecom-${{ github.ref_name }}
+            # speedup the build using cache so save cost 
+            cache-from: type=gha,scope=ecom
+            cache-to: type=gha,mode=max,scope=ecom
             #passing firebase secrets
             build-args: |
               VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -230,6 +251,17 @@ jobs:
           if: github.event_name != 'pull_request'
           run: | 
             docker push ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:ecom-${{ github.ref_name }}
+        - name: Slack notification on failure
+          if: failure()
+          uses: rtCamp/action-slack-notify@v2
+          env:
+            SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+            SLACK_CHANNEL: 'all-gh-actions'         # channel name
+            SLACK_COLOR: 'danger'
+            SLACK_USERNAME: 'Billsathi pipeline'
+            SLACK_ICON_EMOJI: ':rotating_light:'
+            SLACK_TITLE: '🚨 CI/CD Pipeline Failed'
+            SLACK_MESSAGE: 'The build or security scan failed for ecom-app. Click the Actions URL to view the Trivy logs.'
 
     update-manifest:
       name: "Update manifest"
@@ -241,8 +273,8 @@ jobs:
       strategy:
         matrix:
           apps: [
-            {name: "billsathi-bill-admin", path: "dev/app-k8s/admin", prefix: "admin-"},
-            {name: "billsathi-bill-ecom", path: "dev/app-k8s/ecom", prefix: "ecom-"}
+            {name: "billsathi-bill-admin", path: "dev/app-k8s/admin", prefix: "admin"},
+            {name: "billsathi-bill-ecom", path: "dev/app-k8s/ecom", prefix: "ecom"}
           ]
       if: startsWith(github.ref, 'refs/tags/')
       steps:
@@ -299,6 +331,17 @@ jobs:
             
             # Push back to the tf-k8-billsaathi repository
             git push origin HEAD
+        - name: Slack Notification on Success
+          if: success()
+          uses: rtCamp/action-slack-notify@v2
+          env:
+            SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+            SLACK_CHANNEL: 'all-gh-actions'         # channel name
+            SLACK_COLOR: 'good'
+            SLACK_USERNAME: 'Billsathi pipeline'
+            SLACK_ICON_EMOJI: ':rocket:'
+            SLACK_TITLE: '✅ New Release Deployed'
+            SLACK_MESSAGE: 'Version ${{ github.ref_name }} was successfully pushed to the manifest repository and ArgoCD is syncing it now!'
     #k8s-scanning:
       #Control Plane: Checks settings for the API server, etcd, scheduler, and controller manager (e.g., ensuring anonymous auth is disabled).
       #Worker Nodes: Verifies the configuration of the kubelet and proxy services on your nodes.
