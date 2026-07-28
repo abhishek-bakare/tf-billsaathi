@@ -73,7 +73,7 @@ jobs:
                 scan-type: 'fs'
                 scan-ref: '${{ matrix.components }}/inventory-app'
                 format: 'table'
-                exit-code: '0'    # Fail if true vulnerabilities are found
+                exit-code: '0'    # '1' Fail if vulnerabilities are found
                 severity: 'CRITICAL'
     #stage 3
     #sonarqube-testing:
@@ -303,7 +303,7 @@ jobs:
           id: ecr-login
           uses: aws-actions/amazon-ecr-login@v2
         - name: update image tags
-          working-directory: gitops-repo/${{ matrix.apps.path }}
+          working-directory: gitops-repo
           run: |
             VERSION_TAG=${{ github.ref_name }}
             REGISTRY=${{ steps.ecr-login.outputs.registry }}
@@ -312,7 +312,7 @@ jobs:
             kustomize edit set image billsathi-bill-admin=$REGISTRY/${{ env.ECR_REPO }}:admin-$VERSION_TAG
             
             cd ../ecom
-            kustomize edit set image billsathi-bill-ecom=$REGISTRY/${{ env.ECR_REPO }}:ecom-#VERSION_TAG
+            kustomize edit set image billsathi-bill-ecom=$REGISTRY/${{ env.ECR_REPO }}:ecom-$VERSION_TAG
 
         - name: Commit and Push to Manifest Repo
           working-directory: gitops-repo
